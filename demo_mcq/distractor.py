@@ -107,13 +107,17 @@ def _deduplicate(items: List[str], answer: str, n: int) -> List[str]:
 
 # ─────────────────────────── backends ───────────────────────────
 
-class _OpenAIBackend:
-    def __init__(self, api_key: str, model: str):
+class _OpenAICompatBackend:
+    """Backend dùng chung cho OpenAI, Groq và bất kỳ API tương thích OpenAI nào."""
+    def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         try:
             from openai import OpenAI
         except ImportError:
             raise RuntimeError("Chạy: pip install openai")
-        self.client = OpenAI(api_key=api_key)
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = OpenAI(**kwargs)
         self.model  = model
 
     def complete(self, prompt: str) -> str:
@@ -123,7 +127,7 @@ class _OpenAIBackend:
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
-                    max_tokens=120,
+                    max_tokens=200,
                 )
                 return resp.choices[0].message.content or ""
             except Exception as e:
@@ -131,35 +135,97 @@ class _OpenAIBackend:
                     time.sleep(3 * (attempt + 1))
                 else:
                     raise
-        raise RuntimeError("OpenAI API rate limit – thử lại sau.")
+        raise RuntimeError("API rate limit – thử lại sau.")
+
+
+# Alias để không breaking change
+_OpenAIBackend = _OpenAICompatBackend
+
+
+def _load_gemini_keys() -> List[str]:
+    """Đọc tất cả Gemini key từ env: GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3, ..."""
+    keys = []
+    # Key chính
+    k = os.getenv("GEMINI_API_KEY", "").strip()
+    if k:
+        keys.append(k)
+    # Key phụ _2, _3, ..., _10
+    for i in range(2, 11):
+        k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
+        if k:
+            keys.append(k)
+    return keys
 
 
 class _GeminiBackend:
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, keys: List[str], model: str):
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
         except ImportError:
-            raise RuntimeError("Chạy: pip install google-generativeai")
-        genai.configure(api_key=api_key)
-        # response_mime_type="application/json" buộc Gemini trả về JSON hợp lệ
-        # → loại bỏ hoàn toàn lỗi JSONDecodeError
-        self.client = genai.GenerativeModel(
-            model,
-            generation_config={"response_mime_type": "application/json"},
-        )
-        self.model = model
+            raise RuntimeError("Chạy: pip install google-genai")
+        if not keys:
+            raise ValueError("Cần ít nhất 1 GEMINI_API_KEY trong .env")
+        self._genai  = genai
+        self.types   = types
+        self.model   = model
+        self._keys   = keys
+        self._ki     = 0          # index key hiện tại
+        self._clients = [genai.Client(api_key=k) for k in keys]
+        if len(keys) > 1:
+            print(f"[Distractor] Gemini key rotation: {len(keys)} keys")
+
+    @property
+    def _client(self):
+        return self._clients[self._ki]
+
+    def _rotate_key(self) -> bool:
+        """Chuyển sang key tiếp theo. Trả về False nếu hết key."""
+        if self._ki + 1 < len(self._keys):
+            self._ki += 1
+            logger.warning("[Distractor] Gemini quota hết → chuyển key %d/%d", self._ki + 1, len(self._keys))
+            print(f"[Distractor] Chuyển sang Gemini key {self._ki + 1}/{len(self._keys)}")
+            return True
+        return False
 
     def complete(self, prompt: str) -> str:
-        for attempt in range(3):
-            try:
-                resp = self.client.generate_content(prompt)
-                return resp.text or ""
-            except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    time.sleep(4 * (attempt + 1))
-                else:
-                    raise
-        raise RuntimeError("Gemini API rate limit – thử lại sau.")
+        last_err: Exception = RuntimeError("Gemini: no attempts made")
+        # Thử lần lượt từng key, mỗi key tối đa 2 lần
+        while True:
+            for attempt in range(2):
+                try:
+                    resp = self._client.models.generate_content(
+                        model=self.model,
+                        contents=prompt,
+                        config=self.types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    text = resp.text
+                    if text is None:
+                        raise ValueError("Gemini trả về None (có thể bị safety block)")
+                    return text
+                except Exception as e:
+                    last_err = e
+                    err = str(e)
+                    is_quota = "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err
+                    if is_quota:
+                        # Hết quota key này → thử rotate ngay, không wait
+                        logger.warning("[Distractor] Key %d hết quota: %s", self._ki + 1, err[:80])
+                        break   # thoát vòng attempt, sang rotate
+                    else:
+                        wait = 5 * (attempt + 1)
+                        logger.warning("[Distractor] Gemini lỗi (attempt %d), chờ %ds: %s", attempt + 1, wait, err[:120])
+                        time.sleep(wait)
+            else:
+                # 2 lần thử đều lỗi không phải quota → bail out
+                raise RuntimeError(f"Gemini thất bại: {last_err}")
+            # Rotate key
+            if not self._rotate_key():
+                raise RuntimeError(
+                    f"Tất cả {len(self._keys)} Gemini key đã hết quota hôm nay. "
+                    "Thêm key mới vào .env (GEMINI_API_KEY_2=...) hoặc thử lại vào ngày mai."
+                )
 
 
 class _OllamaBackend:
@@ -192,7 +258,8 @@ class DistractorGenerator:
 
     DEFAULTS = {
         "openai": "gpt-4o-mini",
-        "gemini": "gemini-1.5-flash",
+        "groq":   "llama-3.3-70b-versatile",
+        "gemini": "gemini-2.5-flash-lite",
         "ollama": "llama3",
     }
 
@@ -211,13 +278,22 @@ class DistractorGenerator:
             key = api_key or os.getenv("OPENAI_API_KEY", "")
             if not key:
                 raise ValueError("Cần OPENAI_API_KEY. Thêm vào .env hoặc truyền api_key=…")
-            self._backend = _OpenAIBackend(key, model)
+            self._backend = _OpenAICompatBackend(key, model)
+
+        elif backend == "groq":
+            key = api_key or os.getenv("GROQ_API_KEY", "")
+            if not key:
+                raise ValueError("Cần GROQ_API_KEY. Thêm vào .env hoặc truyền api_key=…")
+            self._backend = _OpenAICompatBackend(key, model, base_url="https://api.groq.com/openai/v1")
 
         elif backend == "gemini":
-            key = api_key or os.getenv("GEMINI_API_KEY", "")
-            if not key:
+            if api_key:
+                keys = [api_key]
+            else:
+                keys = _load_gemini_keys()
+            if not keys:
                 raise ValueError("Cần GEMINI_API_KEY. Thêm vào .env hoặc truyền api_key=…")
-            self._backend = _GeminiBackend(key, model)
+            self._backend = _GeminiBackend(keys, model)
 
         elif backend == "ollama":
             host = os.getenv("OLLAMA_HOST", ollama_host)
@@ -225,13 +301,15 @@ class DistractorGenerator:
 
         else:
             raise ValueError(
-                f"Backend '{backend}' không hợp lệ. Chọn: openai | gemini | ollama"
+                f"Backend '{backend}' không hợp lệ. Chọn: openai | groq | gemini | ollama"
             )
 
         print(f"[Distractor] Backend: {backend} / model: {model}")
 
     @staticmethod
     def _detect_backend() -> str:
+        if os.getenv("GROQ_API_KEY"):
+            return "groq"
         if os.getenv("OPENAI_API_KEY"):
             return "openai"
         if os.getenv("GEMINI_API_KEY"):
@@ -240,7 +318,7 @@ class DistractorGenerator:
             return "ollama"
         raise RuntimeError(
             "Không tìm thấy LLM backend.\n"
-            "Vui lòng đặt một trong: OPENAI_API_KEY / GEMINI_API_KEY / OLLAMA_HOST trong file .env"
+            "Vui lòng đặt một trong: GROQ_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OLLAMA_HOST trong file .env"
         )
 
     @staticmethod
@@ -258,6 +336,7 @@ class DistractorGenerator:
         answer: str,
         context: str = "",
         num_distractors: int = 3,
+        _log: bool = True,
     ) -> List[str]:
         """
         Sinh `num_distractors` đáp án sai cho cặp (question, answer).
@@ -266,5 +345,10 @@ class DistractorGenerator:
             List[str] – ví dụ ["Huế", "Đà Nẵng", "Hải Phòng"]
         """
         prompt   = _build_prompt(question, answer, context, num_distractors)
+        if _log:
+            print(f"[Distractor] Q: {question[:60]} | A: {answer}")
         raw_text = self._backend.complete(prompt)
-        return _safe_parse_json(raw_text, num_distractors, answer)
+        result   = _safe_parse_json(raw_text, num_distractors, answer)
+        if _log:
+            print(f"[Distractor] -> {result}")
+        return result
