@@ -94,6 +94,45 @@ EXAMPLE = (
     "Sông Hồng chảy qua phía đông bắc thành phố, tạo nên vùng đất màu mỡ phù sa."
 )
 
+_EXAMPLE_TOPICS = [
+    "lịch sử Việt Nam", "địa lý Việt Nam", "văn hóa ẩm thực Việt Nam",
+    "khoa học vũ trụ", "môi trường và biến đổi khí hậu", "công nghệ trí tuệ nhân tạo",
+    "y học và sức khỏe cộng đồng", "kinh tế Việt Nam", "văn học dân gian Việt Nam",
+    "sinh học đại cương", "lịch sử thế giới", "địa lý tự nhiên",
+]
+
+def _generate_example_paragraph() -> str:
+    """Sinh đoạn văn ví dụ bằng OpenAI (ưu tiên) để giữ Gemini quota cho distractor.
+    Fallback về đoạn cứng nếu không có API key hoặc lỗi."""
+    topic  = random.choice(_EXAMPLE_TOPICS)
+    prompt = (
+        f"Hãy viết một đoạn văn tiếng Việt từ 150 đến 250 từ về chủ đề: {topic}. "
+        "Đoạn văn cần có nhiều dữ kiện cụ thể (tên, số liệu, địa danh, khái niệm) "
+        "để có thể dùng làm ngữ liệu sinh câu hỏi trắc nghiệm. "
+        "Chỉ trả về đoạn văn, không có tiêu đề, không giải thích."
+    )
+
+    # ── Thử OpenAI trước (không tốn Gemini quota) ──────────────
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if openai_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
+            resp   = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.9,
+                max_tokens=400,
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            if len(text) > 50:
+                return text
+        except Exception:
+            pass
+
+    # ── Không có OpenAI → dùng đoạn cứng (giữ Gemini cho distractor) ──
+    return EXAMPLE
+
 def _init_state():
     defaults = {
         "mcq_list":    [],      # List[Dict] – danh sách câu sau edit
@@ -117,7 +156,7 @@ def build_mcq(question: str, answer: str, distractors: List[str]) -> Dict:
         "answer":        answer,
         "options":       options,
         "correct_label": LABELS[options.index(answer)],
-        "source":        "ViQAG + LLM",
+        "source":        "ViT5 + LLM",
     }
 
 
@@ -174,23 +213,30 @@ with st.sidebar:
     st.markdown("## ⚙️ Cấu hình")
 
     # ── ViQAG ──────────────────────────────────────────────────
-    with st.expander("🧠 Stage 1 – ViQAG (sinh Q-A)", expanded=False):
+    with st.expander("🧠 Stage 1 – ViT5 (sinh Q-A)", expanded=False):
         qa_mode = st.radio(
             "Chế độ",
-            ["HF Inference API (không cần GPU)", "Local model (~1GB RAM)"],
+            ["Local model (~1GB RAM)", "HF Inference API (không cần GPU)"],
             index=0,
+            help="Local model: tự download về máy, không cần token. API: gọi HF nhưng chỉ hỗ trợ model phổ biến.",
         )
         use_api_flag = "API" in qa_mode
         viqag_model  = st.text_input(
             "Model",
-            value=os.getenv("VIQAG_MODEL", "VietAI/vit5-base-vi-qag"),
+            value=os.getenv("VIQAG_MODEL", "shnl/vit5-vinewsqa-qg-ae"),
         )
         hf_token_input = st.text_input(
             "HF Token",
             value=os.getenv("HF_TOKEN", ""),
             type="password",
-            help="huggingface.co/settings/tokens",
+            help="Chỉ cần khi dùng HF Inference API. Lấy tại huggingface.co/settings/tokens",
         )
+        if use_api_flag:
+            st.warning(
+                "⚠️ HF Inference API chỉ hỗ trợ các model phổ biến được HF featured. "
+                "Các model ViT5 tiếng Việt thường không khả dụng qua API → khuyến nghị dùng **Local model**.",
+                icon="⚠️",
+            )
 
     # ── LLM ────────────────────────────────────────────────────
     with st.expander("🤖 Stage 2 – LLM (sinh distractors)", expanded=True):
@@ -240,7 +286,7 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
-    st.caption("ViQAG + LLM · Vietnamese MCQ Generator")
+    st.caption("ViT5 + LLM · Vietnamese MCQ Generator")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -249,14 +295,6 @@ with st.sidebar:
 st.markdown(
     "# 📝 Công cụ Soạn Đề Trắc Nghiệm Tiếng Việt"
 )
-st.markdown("""
-<div class="stage-info">
-  <b>Pipeline 2-stage:</b>
-  <span class="badge badge-viqag">Stage 1 · ViQAG (ViT5)</span> sinh câu hỏi + đáp án đúng từ văn bản →
-  <span class="badge badge-llm">Stage 2 · LLM</span> sinh đáp án nhiễu (distractors) →
-  <span class="badge badge-done">Build MCQ</span> xáo trộn + hiển thị
-</div>
-""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
 # LAYOUT: 2 cột chính  (input+output) + preview
@@ -272,27 +310,34 @@ with col_main:
     st.markdown("#### 📄 Bước 1 – Nhập đoạn văn bản")
 
     col_ta, col_ex = st.columns([5, 1])
+    with col_ex:
+        st.markdown(" ")   # padding
+        if st.button("🎲\nVí dụ", use_container_width=True, help="Sinh đoạn văn ngẫu nhiên (OpenAI nếu có key, không thì dùng đoạn mẫu)"):
+            with st.spinner("Đang sinh đoạn văn…"):
+                st.session_state["context_input"] = _generate_example_paragraph()
+            st.rerun()
     with col_ta:
         context = st.text_area(
             "Nội dung",
             height=200,
             placeholder="Dán đoạn văn từ sách giáo khoa, bài báo, bài giảng…",
             label_visibility="collapsed",
+            key="context_input",
         )
-    with col_ex:
-        st.markdown(" ")   # padding
-        if st.button("📋\nVí dụ", use_container_width=True):
-            st.session_state["_set_ctx"] = EXAMPLE
-            st.rerun()
-
-    if "_set_ctx" in st.session_state:
-        context = st.session_state.pop("_set_ctx")
 
     word_count = len(context.split()) if context else 0
     st.caption(f"Số từ: **{word_count}**  |  Khuyến nghị: 100–500 từ")
 
     # ── Nút Generate ───────────────────────────────────────────
     st.markdown("#### 🚀 Bước 2 – Sinh câu hỏi")
+    num_pairs = st.number_input(
+        "Số câu hỏi muốn sinh",
+        min_value=1,
+        max_value=20,
+        value=num_pairs,
+        step=1,
+        help="Số cặp Q-A tối đa sẽ được sinh ra từ đoạn văn",
+    )
     generate_btn = st.button(
         "✨  Sinh câu hỏi trắc nghiệm",
         type="primary",
@@ -320,7 +365,7 @@ with col_main:
             # ── Load models ───────────────────────────────────
             with st.status("⚙️ Khởi tạo model…", expanded=True) as s:
                 try:
-                    st.write("🔄 Đang kết nối ViQAG (ViT5)…")
+                    st.write("🔄 Đang kết nối ViT5…")
                     qa_gen = load_qa_generator(viqag_model, use_api_flag, hf_token_input)
                     st.write("🔄 Đang kết nối LLM backend…")
                     dist_gen = load_distractor_generator(
@@ -337,13 +382,15 @@ with col_main:
 
             # ── Stage 1: ViQAG ────────────────────────────────
             with st.status(
-                "🧠 **Stage 1 · ViQAG** – Đang phân tích văn bản và sinh Q-A…",
+                "🧠 **Stage 1 · ViT5** – Đang phân tích văn bản và sinh Q-A…",
                 expanded=True,
             ) as s:
                 try:
-                    qa_pairs = qa_gen.generate(ctx, num_pairs=num_pairs)
+                    # Yêu cầu thêm 50% để bù cho lọc chất lượng (trùng lặp, answer leakage…)
+                    _request_pairs = max(num_pairs + 2, int(num_pairs * 1.5))
+                    qa_pairs = qa_gen.generate(ctx, num_pairs=_request_pairs)
                     if not qa_pairs:
-                        s.update(label="⚠️ ViQAG không trả về kết quả", state="error")
+                        s.update(label="⚠️ ViT5 không trả về kết quả", state="error")
                         st.warning(
                             "Không tìm thấy câu hỏi phù hợp.  \n"
                             "Thử: văn bản dài hơn · kiểm tra HF Token · đổi sang Local model."
@@ -354,9 +401,40 @@ with col_main:
                         state="complete",
                     )
                 except Exception as e:
-                    s.update(label="❌ Lỗi ViQAG", state="error")
-                    st.error(f"ViQAG lỗi: {e}")
+                    s.update(label="❌ Lỗi ViT5", state="error")
+                    st.error(f"ViT5 lỗi: {e}")
                     st.stop()
+
+            # ── Quality filter Q-A pairs ───────────────────
+            def _jaccard(q1: str, q2: str) -> float:
+                w1 = set(q1.lower().split())
+                w2 = set(q2.lower().split())
+                if not w1 or not w2:
+                    return 0.0
+                return len(w1 & w2) / len(w1 | w2)
+
+            def _filter_qa(pairs):
+                seen_q = []
+                result = []
+                for p in pairs:
+                    q_, a_ = p["question"], p["answer"]
+                    # Bỏ answer quá dài (>15 từ)
+                    if len(a_.split()) > 15:
+                        continue
+                    # Bỏ answer xuất hiện trong question (answer leakage)
+                    if a_.lower() in q_.lower():
+                        continue
+                    # Bỏ câu hỏi gần giống nhau – Jaccard >= 0.55
+                    if any(_jaccard(q_, sq) >= 0.55 for sq in seen_q):
+                        continue
+                    seen_q.append(q_)
+                    result.append(p)
+                return result
+
+            qa_pairs = _filter_qa(qa_pairs)[:num_pairs]  # giữ tối đa num_pairs sau lọc
+            if not qa_pairs:
+                st.warning("⚠️ Sau khi lọc chất lượng, không còn câu hỏi phù hợp. Thử đoạn văn khác.")
+                st.stop()
 
             # ── Stage 2: LLM distractors ─────────────────────
             progress_bar = st.progress(0, text="🤖 Stage 2 · LLM – Đang sinh distractors…")
@@ -368,8 +446,10 @@ with col_main:
                     i / len(qa_pairs),
                     text=f"🤖 Stage 2 · LLM – Câu {i+1}/{len(qa_pairs)}: {q[:45]}…",
                 )
+                # Throttle: ≥4s between calls to stay within Gemini free-tier rate limit
+                if i > 0:
+                    time.sleep(4)
                 try:
-                    # Truyền difficulty hint vào prompt thông qua context field
                     augmented_ctx = f"{ctx}\n[Yêu cầu: distractors {diff_hint}]"
                     distractors = dist_gen.generate(
                         question=q, answer=a,
@@ -378,26 +458,30 @@ with col_main:
                     )
                     while len(distractors) < num_distractors:
                         distractors.append(f"[Đáp án sai {len(distractors)+1}]")
-
                     mcq_list_new.append(build_mcq(q, a, distractors[:num_distractors]))
                 except Exception as e:
+                    print(f"[Distractor] FAILED câu {i+1}: {e}")
                     errors_list.append(f"Câu {i+1}: {e}")
-
-                time.sleep(0.25)
+                    # Fallback: vẫn thêm câu với placeholder distractor
+                    placeholders = [f"[Đáp án sai {j+1}]" for j in range(num_distractors)]
+                    mcq_list_new.append(build_mcq(q, a, placeholders))
 
             progress_bar.progress(1.0, text="✅ Stage 2 hoàn tất!")
-            time.sleep(0.4)
+            time.sleep(0.3)
             progress_bar.empty()
 
             if errors_list:
-                with st.expander("⚠️ Một số câu gặp lỗi"):
-                    for err in errors_list:
-                        st.warning(err)
+                st.warning(
+                    f"⚠️ LLM distractor gặp lỗi {len(errors_list)}/{len(qa_pairs)} câu "
+                    f"(dùng placeholder tạm). "
+                    f"Lỗi: {str(errors_list[0])[:120]}"
+                )
 
             st.session_state["mcq_list"] = mcq_list_new
             st.session_state["selected"] = set(range(len(mcq_list_new)))
             save_to_history(mcq_list_new)
-            st.success(f"🎉 Hoàn tất! Đã tạo **{len(mcq_list_new)} câu trắc nghiệm**.")
+            if mcq_list_new:
+                st.success(f"🎉 Hoàn tất! Đã tạo **{len(mcq_list_new)} câu trắc nghiệm**.")
             st.rerun()
 
     # ══════════════════════════════════════════════════════════
@@ -449,7 +533,7 @@ with col_main:
                 hc1, hc2 = st.columns([1, 11])
                 with hc1:
                     checked = st.checkbox(
-                        "", value=is_selected,
+                        f"Chọn câu {idx+1}", value=is_selected,
                         key=f"sel_{idx}",
                         label_visibility="collapsed",
                     )
@@ -463,7 +547,7 @@ with col_main:
                 with hc2:
                     st.markdown(
                         f'<span style="font-weight:700;font-size:1rem;">Câu {idx+1}</span>'
-                        f'<span class="badge badge-viqag" style="font-size:.7rem;">{mcq.get("source","ViQAG+LLM")}</span>',
+                        f'<span class="badge badge-viqag" style="font-size:.7rem;">{mcq.get("source","ViT5+LLM")}</span>',
                         unsafe_allow_html=True,
                     )
 
@@ -572,15 +656,13 @@ with col_main:
             "3. Chỉnh sửa câu hỏi nếu cần\n"
             "4. Export Word/PDF từ cột bên phải"
         )
-        with st.expander("ℹ️ Về pipeline ViQAG + LLM"):
+        with st.expander("ℹ️ Về pipeline ViT5 + LLM"):
             st.markdown("""
 | Thành phần | Vai trò |
 |---|---|
-| **ViQAG (ViT5)** | Model `VietAI/vit5-base-vi-qag` sinh câu hỏi từ văn bản tiếng Việt |
-| **LLM** | Sinh 3–4 đáp án nhiễu (Gemini / OpenAI / Ollama) |
+| **ViT5** | Model fine-tuned `shnl/vit5-vinewsqa-qg-ae` sinh câu hỏi & trích đáp án từ văn bản tiếng Việt |
+| **LLM** | Sinh 3–4 đáp án nhiễu (Groq / Gemini / OpenAI / Ollama) |
 | **MCQ Builder** | Xáo trộn đáp án, đánh nhãn A/B/C/D |
-
-**Nguồn tham khảo:** [ViQAG repo](https://github.com/asahi417/lm-question-generation) · [VietAI](https://huggingface.co/VietAI)
             """)
 
 

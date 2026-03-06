@@ -83,6 +83,35 @@ def export_word_bytes(mcq_list: List[Dict], title: str = "Đề kiểm tra trắ
 # ══════════════════════════════════════════════════════════════
 # PDF EXPORT  (fpdf2)
 # ══════════════════════════════════════════════════════════════
+def _register_unicode_font(pdf) -> str:
+    """
+    Đăng ký font TTF hỗ trợ tiếng Việt cho fpdf2.
+    Trả về tên family đã đăng ký (dùng cho set_font).
+    """
+    import os
+    candidates = [
+        # Windows – Arial
+        ("Arial",   r"C:\Windows\Fonts\arial.ttf",   r"C:\Windows\Fonts\arialbd.ttf"),
+        # Windows – Calibri
+        ("Calibri", r"C:\Windows\Fonts\calibri.ttf", r"C:\Windows\Fonts\calibrib.ttf"),
+        # Windows – Times New Roman
+        ("Times",   r"C:\Windows\Fonts\times.ttf",   r"C:\Windows\Fonts\timesbd.ttf"),
+        # Linux/macOS – DejaVu
+        ("DejaVu",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        # macOS
+        ("Arial",   "/Library/Fonts/Arial.ttf",      "/Library/Fonts/Arial Bold.ttf"),
+    ]
+    for family, reg, bold in candidates:
+        if os.path.exists(reg):
+            pdf.add_font(family, style="", fname=reg)
+            pdf.add_font(family, style="B", fname=bold if os.path.exists(bold) else reg)
+            return family
+    # Không tìm thấy TTF – dùng Helvetica (non-Unicode, dấu tiếng Việt sẽ bị lỗi)
+    return "Helvetica"
+
+
 def export_pdf_bytes(mcq_list: List[Dict], title: str = "Đề kiểm tra trắc nghiệm") -> bytes:
     """Trả về bytes của file .pdf (UTF-8 tiếng Việt)."""
     try:
@@ -90,58 +119,52 @@ def export_pdf_bytes(mcq_list: List[Dict], title: str = "Đề kiểm tra trắc
     except ImportError:
         raise RuntimeError("Chạy: pip install fpdf2")
 
+    _title_ref = [title]  # closure-friendly
+
     class PDF(FPDF):
         def header(self):
-            self.set_font("Helvetica", "B", 14)
-            self.cell(0, 10, title, align="C", new_x="LMARGIN", new_y="NEXT")
+            self.set_font(_font, "B", 14)
+            self.cell(0, 10, _title_ref[0], align="C", new_x="LMARGIN", new_y="NEXT")
             self.ln(4)
 
         def footer(self):
             self.set_y(-15)
-            self.set_font("Helvetica", "I", 8)
+            self.set_font(_font, "", 8)
             self.cell(0, 10, f"Trang {self.page_no()}", align="C")
 
     pdf = PDF()
+    _font = _register_unicode_font(pdf)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # fpdf2 dùng font built-in (Latin-1 safe) – tiếng Việt cần unicodify
-    # Thay dấu bằng cách dùng font DejaVu nếu có, không thì strip dấu
-    def _safe(text: str) -> str:
-        """fpdf2 hỗ trợ UTF-8 với set_font core + latin-1 fallback."""
-        return text  # fpdf2 >= 2.7 hỗ trợ unicode trực tiếp
-
-    pdf.set_font("Helvetica", size=12)
-
     for i, mcq in enumerate(mcq_list, 1):
         # Câu hỏi
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 8, f"Câu {i}. {_safe(mcq['question'])}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(_font, "B", 12)
+        pdf.multi_cell(0, 8, f"Cau {i}. {mcq['question']}", new_x="LMARGIN", new_y="NEXT")
 
         # Lựa chọn
-        pdf.set_font("Helvetica", size=11)
         for j, opt in enumerate(mcq["options"]):
             lbl = LABELS[j]
             is_correct = (lbl == mcq["correct_label"])
             if is_correct:
-                pdf.set_text_color(22, 163, 74)   # xanh lá
-                pdf.set_font("Helvetica", "B", 11)
+                pdf.set_text_color(22, 163, 74)
+                pdf.set_font(_font, "B", 11)
             else:
                 pdf.set_text_color(55, 65, 81)
-                pdf.set_font("Helvetica", size=11)
-            pdf.multi_cell(0, 7, f"   {lbl}. {_safe(opt)}", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font(_font, "", 11)
+            pdf.multi_cell(0, 7, f"   {lbl}. {opt}", new_x="LMARGIN", new_y="NEXT")
 
         pdf.set_text_color(0, 0, 0)
         pdf.ln(4)
 
     # Trang đáp án
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 10, "ĐÁP ÁN", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(_font, "B", 13)
+    pdf.cell(0, 10, "DAP AN", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
-    pdf.set_font("Helvetica", size=11)
+    pdf.set_font(_font, "", 11)
     for i, mcq in enumerate(mcq_list, 1):
-        pdf.cell(60, 8, f"Câu {i}: {mcq['correct_label']}")
+        pdf.cell(60, 8, f"Cau {i}: {mcq['correct_label']}")
         if i % 3 == 0:
             pdf.ln(8)
     pdf.ln(8)

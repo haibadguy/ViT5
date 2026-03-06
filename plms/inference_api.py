@@ -24,7 +24,7 @@ def call_api(input_text,
         "parameters": {"do_sample": do_sample, "num_beams": num_beams, "max_length": max_length, "top_p": top_p},
         "options": {"wait_for_model": True, "use_gpu": use_gpu}
     })
-    response = requests.request("POST", f"https://api-inference.huggingface.co/models/{model}",
+    response = requests.request("POST", f"https://router.huggingface.co/hf-inference/models/{model}",
                                 headers={"Authorization": f"Bearer {api_token}"}, data=data)
     data = response.json()
     if type(data) is dict and 'error' in data.keys():
