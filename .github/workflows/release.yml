@@ -29,14 +29,17 @@ jobs:
           fi
 
           # Idempotent: tag được đẩy lại (ví dụ sau khi sửa commit) thì cập nhật
-          # release đã có thay vì lỗi "release already exists".
+          # release đã có thay vì lỗi "release already exists". --draft=false vì
+          # khi tag bị xoá/tạo lại, GitHub có thể hạ release xuống draft.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG đã tồn tại → cập nhật"
+            echo "Release $TAG đã tồn tại → cập nhật và publish"
             gh release edit "$TAG" \
               --title "ViT5 Quiz Generator $TAG" \
+              --draft=false \
               "${NOTES_ARGS[@]}"
           else
             gh release create "$TAG" \
               --title "ViT5 Quiz Generator $TAG" \
+              --draft=false \
               "${NOTES_ARGS[@]}"
           fi
