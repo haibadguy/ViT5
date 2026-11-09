@@ -1,0 +1,33 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          NOTES_FILE="docs/release-${TAG}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "Dùng nội dung release: $NOTES_FILE"
+            gh release create "$TAG" \
+              --title "ViT5 Quiz Generator $TAG" \
+              --notes-file "$NOTES_FILE"
+          else
+            echo "Không có $NOTES_FILE → tự sinh notes từ commit"
+            gh release create "$TAG" \
+              --title "ViT5 Quiz Generator $TAG" \
+              --generate-notes
+          fi
