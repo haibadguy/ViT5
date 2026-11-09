@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.1] – 2026-11-10
+
+### Added
+- `scripts/smoke_stage1.py`: chạy Stage 1 (ViT5 local) → `build_mcq` → validate →
+  export Word/PDF, **không cần API key**; `--tiny` dùng model 5 MB để kiểm tra
+  code path trong ~10 giây. Đã chạy thật với torch 2.15.0+cpu / transformers 5.22.2.
+
+### Changed
+- Ghim version dependency đã kiểm thử (`requirements.txt`, `requirements-dev.txt`);
+  `torch` giữ range vì phải chọn CPU/CUDA theo máy. `openai` / `google-genai` giữ
+  range vì chưa chạy được trên máy dev (thiếu key).
+- README: bỏ hướng dẫn quay GIF, nói rõ "không có key thì app mở được nhưng sinh
+  câu hỏi sẽ báo lỗi cấu hình", thêm mục chạy `smoke_stage1.py`.
+
+### Fixed
+- Bỏ `.coverage` bị commit nhầm; ignore `.idea/`, `.vscode/`, `coverage.xml`, `htmlcov/`.
+
 ## [1.0.0] – 2026-11-10
 
 ### Removed
