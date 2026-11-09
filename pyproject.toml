@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+# Code kế thừa từ ViQAG không nằm trong phạm vi lint (giữ diff nhỏ, P0 trước)
+extend-exclude = ["plms", "llm", "data", "assets", "docs", "train.py", "evaluation.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# app.py là UI Streamlit: import trong hàm là chủ ý (lazy load)
+"demo_mcq/app.py" = ["E402"]
