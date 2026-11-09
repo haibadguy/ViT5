@@ -43,6 +43,16 @@ def test_detect_backend_raises_without_any_config(monkeypatch):
         DistractorGenerator._detect_backend()
 
 
+def test_detect_backend_honours_ollama_base_url(monkeypatch):
+    """Nhiều hướng dẫn dùng OLLAMA_BASE_URL thay cho OLLAMA_HOST."""
+    for name in ("GROQ_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+                 "OLLAMA_HOST", "LLM_BACKEND"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    assert DistractorGenerator._detect_backend() == "ollama"
+
+
 def test_model_defaults_to_env_override(monkeypatch):
     """Model đọc từ <BACKEND>_MODEL trong .env (không tạo client thật)."""
     import types

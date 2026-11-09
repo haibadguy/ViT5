@@ -335,7 +335,12 @@ with st.sidebar:
         )
         ollama_host = st.text_input(
             "Ollama Host",
-            value=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            value=(
+                os.getenv("OLLAMA_HOST")
+                or os.getenv("OLLAMA_BASE_URL")
+                or "http://localhost:11434"
+            ),
+            help="Biến OLLAMA_HOST hoặc OLLAMA_BASE_URL trong .env cũng được dùng.",
         )
 
     # Key hiệu lực: nhập tay > .env

@@ -413,7 +413,7 @@ Các metric được tính: BLEU-4, ROUGE-L, BERTScore (F1).
 
 ```bash
 pip install -r demo_mcq/requirements-dev.txt
-pytest -q                 # 36 test, chạy offline (không gọi API, không tải model)
+pytest -q                 # 49 test, chạy offline (không gọi API, không tải model)
 ruff check .              # lint
 ```
 
@@ -422,11 +422,13 @@ CI chạy tự động trên GitHub Actions với Python 3.10 và 3.12:
 
 | File test | Nội dung |
 |---|---|
-| `tests/test_schema.py` | Validate MCQ: thiếu lựa chọn, trùng, index sai, round-trip dict |
+| `tests/test_schema.py` | Validate MCQ: thiếu lựa chọn, trùng, index sai, round-trip dict, build/shuffle |
 | `tests/test_parser.py` | Parse JSON từ LLM (fence, chatty, fallback) + parse bộ đề JSON |
 | `tests/test_export.py` | Word / PDF / TXT / JSON / CSV — kiểm tra dấu tiếng Việt & trang đáp án |
 | `tests/test_generator.py` | `QAGenerator` với `_load_local` bị mock (không cần torch) |
-| `tests/test_distractor.py` | Parse distractor + chọn backend + override model qua env |
+| `tests/test_distractor.py` | Parse distractor, chọn backend, `OLLAMA_BASE_URL`, override model qua env |
+| `tests/test_config.py` | `.env.example` khớp code (đủ 4 backend, không chứa key thật, `.env` bị ignore) |
+| `tests/test_app_smoke.py` | `streamlit.testing.AppTest` render UI không exception (skip nếu thiếu streamlit) |
 
 ---
 

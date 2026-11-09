@@ -29,6 +29,20 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+# OLLAMA_HOST là biến chuẩn của Ollama; OLLAMA_BASE_URL được chấp nhận thêm
+# vì nhiều hướng dẫn/tài liệu dùng tên này.
+OLLAMA_HOST_ENV_VARS = ("OLLAMA_HOST", "OLLAMA_BASE_URL")
+
+
+def _ollama_host(default: str = DEFAULT_OLLAMA_HOST) -> str:
+    """Host Ollama từ env (OLLAMA_HOST → OLLAMA_BASE_URL → default)."""
+    for name in OLLAMA_HOST_ENV_VARS:
+        value = (os.getenv(name, "") or "").strip()
+        if value:
+            return value
+    return default
+
 # ─────────────────────────── prompt ─────────────────────────────
 def _build_prompt(question: str, answer: str, context: str, n: int) -> str:
     ctx_section = f"\nContext:\n{context}\n" if context else ""
@@ -301,7 +315,7 @@ class DistractorGenerator:
             self._backend = _GeminiBackend(keys, model)
 
         elif backend == "ollama":
-            host = os.getenv("OLLAMA_HOST", ollama_host)
+            host = _ollama_host(ollama_host)
             self._backend = _OllamaBackend(host, model)
 
         else:
@@ -322,18 +336,20 @@ class DistractorGenerator:
             return "openai"
         if os.getenv("GEMINI_API_KEY"):
             return "gemini"
-        if os.getenv("OLLAMA_HOST") or DistractorGenerator._ollama_alive():
+        if _ollama_host("") or DistractorGenerator._ollama_alive():
             return "ollama"
         raise RuntimeError(
             "Không tìm thấy LLM backend.\n"
-            "Vui lòng đặt một trong: GROQ_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OLLAMA_HOST trong file .env"
+            "Vui lòng đặt một trong: GROQ_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY "
+            "/ OLLAMA_HOST (hoặc OLLAMA_BASE_URL) trong file .env"
         )
 
     @staticmethod
-    def _ollama_alive(host: str = "http://localhost:11434") -> bool:
+    def _ollama_alive(host: str = "") -> bool:
         try:
             import requests
-            r = requests.get(f"{host}/api/tags", timeout=2)
+            base = _ollama_host(host or DEFAULT_OLLAMA_HOST)
+            r = requests.get(f"{base}/api/tags", timeout=2)
             return r.status_code == 200
         except Exception:
             return False

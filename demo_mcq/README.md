@@ -145,7 +145,7 @@ Chọn backend bằng `LLM_BACKEND` trong `.env` (hoặc `auto` = tự dò theo 
 
 ```bash
 pip install -r requirements-dev.txt
-cd .. && pytest -q      # 39 test, chạy offline
+cd .. && pytest -q      # 49 test, chạy offline
 ```
 
 Xem thêm [`../README.md`](../README.md) (kiến trúc, giới hạn, CI) và
