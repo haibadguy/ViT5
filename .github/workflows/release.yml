@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -22,12 +22,21 @@ jobs:
           NOTES_FILE="docs/release-${TAG}.md"
           if [ -f "$NOTES_FILE" ]; then
             echo "Dùng nội dung release: $NOTES_FILE"
-            gh release create "$TAG" \
-              --title "ViT5 Quiz Generator $TAG" \
-              --notes-file "$NOTES_FILE"
+            NOTES_ARGS=(--notes-file "$NOTES_FILE")
           else
             echo "Không có $NOTES_FILE → tự sinh notes từ commit"
+            NOTES_ARGS=(--generate-notes)
+          fi
+
+          # Idempotent: tag được đẩy lại (ví dụ sau khi sửa commit) thì cập nhật
+          # release đã có thay vì lỗi "release already exists".
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG đã tồn tại → cập nhật"
+            gh release edit "$TAG" \
+              --title "ViT5 Quiz Generator $TAG" \
+              "${NOTES_ARGS[@]}"
+          else
             gh release create "$TAG" \
               --title "ViT5 Quiz Generator $TAG" \
-              --generate-notes
+              "${NOTES_ARGS[@]}"
           fi

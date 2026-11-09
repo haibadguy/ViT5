@@ -1,10 +1,11 @@
 # Dependencies cho test + lint (CI dùng file này, KHÔNG cần torch/streamlit)
-# Ghim đúng version đã chạy xanh trên Python 3.10 & 3.12
-pytest==9.2.0
-pytest-cov==7.1.0
-ruff==0.17.4
+# Để range thay vì ghim: ghim version cụ thể dễ vỡ khi bản đó không có trên PyPI
+# của runner (đã thử ghim một lần và CI đỏ ngay ở bước install).
+pytest>=8.0.0
+pytest-cov>=5.0.0
+ruff>=0.6.0
 
 # Cần cho test export (Word / PDF)
-python-docx==1.2.0
-fpdf2==2.9.0
-pypdf==7.0.0
+python-docx>=1.1.0
+fpdf2>=2.7.9
+pypdf>=4.0.0

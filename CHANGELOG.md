@@ -8,9 +8,9 @@
   code path trong ~10 giây. Đã chạy thật với torch 2.15.0+cpu / transformers 5.22.2.
 
 ### Changed
-- Ghim version dependency đã kiểm thử (`requirements.txt`, `requirements-dev.txt`);
-  `torch` giữ range vì phải chọn CPU/CUDA theo máy. `openai` / `google-genai` giữ
-  range vì chưa chạy được trên máy dev (thiếu key).
+- **Giữ range thay vì ghim version** trong `requirements.txt` / `requirements-dev.txt`.
+  (Đã thử ghim đúng bản chạy trên máy dev và CI đỏ ngay ở bước install — bản đó không
+  có trên PyPI của runner. Ghi lại để không lặp lại.)
 - README: bỏ hướng dẫn quay GIF, nói rõ "không có key thì app mở được nhưng sinh
   câu hỏi sẽ báo lỗi cấu hình", thêm mục chạy `smoke_stage1.py`.
 

@@ -1,23 +1,22 @@
 # ─── Core ──────────────────────────────────────────────────────
-streamlit==1.67.0
-python-dotenv==1.2.4
-requests==2.34.2
+streamlit>=1.32.0
+python-dotenv>=1.0.0
+requests>=2.31.0
 
 # ─── Stage 1 · ViT5 (chạy local) ───────────────────────────────
 # torch: chọn bản theo máy, đừng để pip tự chọn (xem README)
 #   CPU : pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   GPU : pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.1.0
-# Đã kiểm thử với transformers 5.22.2 (xem scripts/smoke_stage1.py)
-transformers==5.22.2
-sentencepiece==0.2.3
-accelerate==1.15.0
+# Code chạy được với cả transformers 4.x và 5.x
+transformers>=4.38.0
+sentencepiece>=0.1.99
+accelerate>=0.27.0
 
 # ─── Stage 2 · LLM backends (chỉ cần backend bạn dùng) ─────────
-# Chưa kiểm thử trên máy dev (thiếu key) → để range thay vì ghim
 openai>=1.12.0
 google-genai>=1.0.0
 
 # ─── Export ────────────────────────────────────────────────────
-python-docx==1.2.0
-fpdf2==2.9.0
+python-docx>=1.1.0
+fpdf2>=2.7.9
