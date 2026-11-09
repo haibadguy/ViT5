@@ -2,6 +2,8 @@
 
 ![tests](https://github.com/haibadguy/ViT5/actions/workflows/tests.yml/badge.svg)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.12-blue)
+![release](https://img.shields.io/github/v/release/haibadguy/ViT5)
+![license](https://img.shields.io/github/license/haibadguy/ViT5)
 
 Đồ án ứng dụng mô hình ngôn ngữ lớn (PLM + LLM) vào bài toán sinh câu hỏi trắc nghiệm (Multiple Choice Question Generation) cho văn bản tiếng Việt.
 
