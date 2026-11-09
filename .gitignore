@@ -2,5 +2,13 @@ system/
 # environment / secrets
 .env
 demo_mcq/.env
+.streamlit/secrets.toml
+outputs/
 __pycache__/
 demo_mcq/__pycache__/
+
+# tooling
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.pyc
