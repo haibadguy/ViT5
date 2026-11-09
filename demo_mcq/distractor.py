@@ -20,11 +20,11 @@ Dùng:
     # ["Huế", "Đà Nẵng", "Hải Phòng"]
 """
 
+import json
+import logging
 import os
 import re
-import json
 import time
-import logging
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,8 @@ def _build_prompt(question: str, answer: str, context: str, n: int) -> str:
 Câu hỏi: {question}
 Đáp án đúng: {answer}{ctx_section}
 Hãy tạo **chính xác {n} đáp án sai** (distractors) chất lượng cao theo các tiêu chí nghiêm ngặt sau:
-1. Thuộc cùng phạm trù/loại thực thể với đáp án đúng (ví dụ: cùng là địa danh, cùng là năm tháng, cùng là tên người, cùng là khái niệm khoa học…).
+1. Thuộc cùng phạm trù/loại thực thể với đáp án đúng (ví dụ: cùng là địa danh,
+   cùng là năm tháng, cùng là tên người, cùng là khái niệm khoa học…).
 2. Hợp lý, gần giống về ngữ nghĩa và có sức nhiễu cao (plausible distractors) nhưng chắc chắn sai.
 3. Ngắn gọn, tự nhiên, đúng ngữ pháp tiếng Việt.
 4. Không trùng hoặc gần trùng với đáp án đúng và không lặp lại lẫn nhau.
@@ -215,7 +216,10 @@ class _GeminiBackend:
                         break   # thoát vòng attempt, sang rotate
                     else:
                         wait = 5 * (attempt + 1)
-                        logger.warning("[Distractor] Gemini lỗi (attempt %d), chờ %ds: %s", attempt + 1, wait, err[:120])
+                        logger.warning(
+                            "[Distractor] Gemini lỗi (attempt %d), chờ %ds: %s",
+                            attempt + 1, wait, err[:120],
+                        )
                         time.sleep(wait)
             else:
                 # 2 lần thử đều lỗi không phải quota → bail out
@@ -271,7 +275,8 @@ class DistractorGenerator:
         ollama_host: str       = "http://localhost:11434",
     ):
         backend = backend or self._detect_backend()
-        model   = model   or self.DEFAULTS.get(backend, "gpt-4o-mini")
+        env_model = (os.getenv(f"{backend.upper()}_MODEL", "") or "").strip()
+        model = model or env_model or self.DEFAULTS.get(backend, "gpt-4o-mini")
         self.backend_name = backend
 
         if backend == "openai":
@@ -308,6 +313,9 @@ class DistractorGenerator:
 
     @staticmethod
     def _detect_backend() -> str:
+        preferred = (os.getenv("LLM_BACKEND", "") or "").strip().lower()
+        if preferred in ("groq", "openai", "gemini", "ollama"):
+            return preferred
         if os.getenv("GROQ_API_KEY"):
             return "groq"
         if os.getenv("OPENAI_API_KEY"):

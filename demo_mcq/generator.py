@@ -19,12 +19,11 @@ Dùng:
     # [{"question": "…", "answer": "…"}, …]
 """
 
+import logging
 import os
 import re
 import unicodedata
-import logging
-import time
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -76,15 +75,16 @@ class QAGenerator:
 
     Tham số:
         model_name : Tên model HF hub.
-        use_api    : Giữ để tương thích với app.py (bị bỏ qua – luôn dùng local).
-        hf_token   : HF token (cần nếu model private).
+        hf_token   : HF token (cần nếu model private/gated).
         device     : "cpu" | "cuda" | "auto".
+
+    Ghi chú: chế độ "HF Inference API" đã bị bỏ (model ViT5 tiếng Việt không
+    khả dụng qua Inference API) – luôn chạy local.
     """
 
     def __init__(
         self,
         model_name: str = None,
-        use_api: bool = None,
         hf_token: str = None,
         device: str = "auto",
     ):
@@ -103,7 +103,7 @@ class QAGenerator:
     def _load_local(self):
         try:
             import torch
-            from transformers import AutoTokenizer, T5ForConditionalGeneration, AutoModelForSeq2SeqLM
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, T5ForConditionalGeneration
         except ImportError:
             raise RuntimeError(
                 "Thiếu thư viện. Chạy:  pip install torch transformers sentencepiece"

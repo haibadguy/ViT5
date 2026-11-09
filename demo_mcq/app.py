@@ -7,12 +7,20 @@ Chạy:
     streamlit run app.py
 """
 
-import os, random, json, time, copy
+import copy
+import os
+import random
+import re
+import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
+
+# Module nội bộ nằm cùng thư mục demo_mcq/ (Streamlit thêm thư mục script vào sys.path)
+from schema import build_mcq as _build_mcq
+from schema import shuffle_mcq as _shuffle_mcq
 
 # ── load .env ──────────────────────────────────────────────────
 load_dotenv(Path(__file__).parent / ".env")
@@ -148,24 +156,76 @@ def _init_state():
 _init_state()
 
 
-def build_mcq(question: str, answer: str, distractors: List[str]) -> Dict:
-    options = distractors[:3] + [answer]
-    random.shuffle(options)
-    return {
-        "question":      question,
-        "answer":        answer,
-        "options":       options,
-        "correct_label": LABELS[options.index(answer)],
-        "source":        "ViT5 + LLM",
-    }
+# ══════════════════════════════════════════════════════════════
+# Bảo vệ API key + lỗi thân thiện
+# ══════════════════════════════════════════════════════════════
+LLM_BACKENDS = ["auto", "gemini", "openai", "groq", "ollama"]
+BACKEND_ENV_KEYS = {
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "groq":   "GROQ_API_KEY",
+}
+
+# Bắt các chuỗi giống API key để không bao giờ hiển thị ra UI / log
+_KEY_PATTERN = re.compile(
+    r"(AIza[0-9A-Za-z_\-]{8,}|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]{8,}|hf_[A-Za-z0-9]{8,})"
+)
+
+
+def mask_key(key: Optional[str]) -> str:
+    """Che key khi hiển thị: 'AIza…9f2c'. Không bao giờ trả về full key."""
+    if not key:
+        return "(chưa đặt)"
+    key = key.strip()
+    if len(key) <= 8:
+        return "***"
+    return f"{key[:4]}…{key[-4:]}"
+
+
+def scrub_secrets(text: str) -> str:
+    """Xoá mọi chuỗi giống API key khỏi message trước khi hiển thị."""
+    return _KEY_PATTERN.sub("***", str(text or ""))
+
+
+def friendly_llm_error(exc: Exception) -> str:
+    """Đổi lỗi backend thành message dễ hiểu, đã scrub key."""
+    raw = scrub_secrets(exc)
+    low = raw.lower()
+
+    if any(k in low for k in ("invalid api key", "api key not valid", "unauthenticated",
+                              "401", "permission_denied", "invalid_api_key")):
+        return "API key không hợp lệ hoặc đã bị thu hồi (401). Kiểm tra lại key trong .env rồi thử lại."
+    if any(k in low for k in ("429", "quota", "resource_exhausted", "rate limit",
+                              "rate_limit", "too many requests")):
+        return (
+            "Backend đang giới hạn tốc độ hoặc hết quota (429). Đợi ~1 phút, "
+            "đổi sang backend khác, hoặc thêm GEMINI_API_KEY_2 để luân phiên key."
+        )
+    if any(k in low for k in ("connection", "refused", "timed out", "timeout",
+                              "unreachable", "getaddrinfo", "max retries")):
+        return (
+            "Không kết nối được tới backend. Ollama: chạy `ollama serve`. "
+            "Cloud: kiểm tra mạng / proxy / VPN."
+        )
+    if "out of memory" in low or "cuda" in low:
+        return "Hết bộ nhớ khi chạy ViT5. Thử VIQAG_MODEL nhỏ hơn hoặc chạy trên CPU."
+    return f"{type(exc).__name__}: {raw[:200]}"
+
+
+def env_key_for(backend: str) -> str:
+    """Đọc key tương ứng backend từ env (rỗng nếu không có)."""
+    name = BACKEND_ENV_KEYS.get(backend or "")
+    return (os.getenv(name, "") or "").strip() if name else ""
+
+
+def build_mcq(question: str, answer: str, distractors: List[str], num_options: int = 4) -> Dict:
+    """Ghép Q + A + distractors → MCQ đã xáo thứ tự (logic nằm ở schema.py)."""
+    return _build_mcq(question, answer, distractors, num_options=num_options)
 
 
 def shuffle_mcq(mcq: Dict) -> Dict:
-    """Xáo lại thứ tự đáp án, giữ nguyên đáp án đúng."""
-    m = copy.deepcopy(mcq)
-    random.shuffle(m["options"])
-    m["correct_label"] = LABELS[m["options"].index(m["answer"])]
-    return m
+    """Xáo lại thứ tự đáp án, giữ nguyên đáp án đúng (logic nằm ở schema.py)."""
+    return _shuffle_mcq(mcq)
 
 
 def mcq_to_text(mcq_list: List[Dict], show_ans: bool = False) -> str:
@@ -190,9 +250,9 @@ def save_to_history(mcq_list: List[Dict]):
 # Cached model loaders (singleton per session)
 # ══════════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner=False)
-def load_qa_generator(model_name: str, use_api: bool, hf_token: str):
+def load_qa_generator(model_name: str, hf_token: str):
     from generator import QAGenerator
-    return QAGenerator(model_name=model_name or None, use_api=use_api, hf_token=hf_token or None)
+    return QAGenerator(model_name=model_name or None, hf_token=hf_token or None)
 
 
 @st.cache_resource(show_spinner=False)
@@ -214,52 +274,72 @@ with st.sidebar:
 
     # ── ViQAG ──────────────────────────────────────────────────
     with st.expander("🧠 Stage 1 – ViT5 (sinh Q-A)", expanded=False):
-        qa_mode = st.radio(
-            "Chế độ",
-            ["Local model (~1GB RAM)", "HF Inference API (không cần GPU)"],
-            index=0,
-            help="Local model: tự download về máy, không cần token. API: gọi HF nhưng chỉ hỗ trợ model phổ biến.",
-        )
-        use_api_flag = "API" in qa_mode
-        viqag_model  = st.text_input(
+        viqag_model = st.text_input(
             "Model",
             value=os.getenv("VIQAG_MODEL", "shnl/vit5-vinewsqa-qg-ae"),
+            help="Model ViQAG chạy local (torch + transformers).",
         )
         hf_token_input = st.text_input(
-            "HF Token",
+            "HF Token (tuỳ chọn)",
             value=os.getenv("HF_TOKEN", ""),
             type="password",
-            help="Chỉ cần khi dùng HF Inference API. Lấy tại huggingface.co/settings/tokens",
+            help="Chỉ cần với model gated/private. Lấy tại huggingface.co/settings/tokens",
         )
-        if use_api_flag:
-            st.warning(
-                "⚠️ HF Inference API chỉ hỗ trợ các model phổ biến được HF featured. "
-                "Các model ViT5 tiếng Việt thường không khả dụng qua API → khuyến nghị dùng **Local model**.",
-                icon="⚠️",
-            )
+        if hf_token_input:
+            st.caption(f"HF Token: `{mask_key(hf_token_input)}`")
 
     # ── LLM ────────────────────────────────────────────────────
     with st.expander("🤖 Stage 2 – LLM (sinh distractors)", expanded=True):
+        _env_backend = (os.getenv("LLM_BACKEND", "") or "auto").strip().lower()
+        if _env_backend not in LLM_BACKENDS:
+            _env_backend = "auto"
+
         llm_backend = st.selectbox(
             "Backend",
-            ["auto", "gemini", "openai", "ollama"],
-            index=0,
+            LLM_BACKENDS,
+            index=LLM_BACKENDS.index(_env_backend),
+            help=(
+                "auto = dò theo key có trong .env (groq → openai → gemini → ollama). "
+                "Chọn tay để ép một backend."
+            ),
         )
+
+        env_key_name  = BACKEND_ENV_KEYS.get(llm_backend)
+        env_key_value = env_key_for(llm_backend)
+        if env_key_name:
+            if env_key_value:
+                st.caption(f"`{env_key_name}` = {mask_key(env_key_value)} (từ .env)")
+            else:
+                st.caption(f"⚠️ Chưa có `{env_key_name}` trong .env")
+        elif llm_backend == "ollama":
+            st.caption("Ollama: cần chạy `ollama serve` trước.")
+        else:  # auto
+            available = [n for b, n in BACKEND_ENV_KEYS.items() if env_key_for(b)]
+            st.caption("Key có sẵn: " + (", ".join(f"`{n}`" for n in available) if available else "chưa có key nào"))
+
         llm_model = st.text_input(
             "Model name",
             value="",
             placeholder="Để trống = mặc định",
-            help="VD: gemini-1.5-flash, gpt-4o-mini, llama3",
+            help="VD: gemini-2.5-flash-lite, gpt-4o-mini, llama-3.3-70b-versatile, llama3",
         )
         llm_api_key = st.text_input(
-            "API Key",
-            value=os.getenv("GEMINI_API_KEY", "") or os.getenv("OPENAI_API_KEY", ""),
+            "API Key (tuỳ chọn)",
+            value="",
             type="password",
+            placeholder=(
+                f"Để trống = dùng .env ({mask_key(env_key_value)})"
+                if env_key_name else "Chỉ cần khi backend yêu cầu key"
+            ),
+            help="Nhập tay sẽ ghi đè key trong .env. Key không bao giờ được in ra UI hay log.",
         )
         ollama_host = st.text_input(
             "Ollama Host",
             value=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
         )
+
+    # Key hiệu lực: nhập tay > .env
+    llm_api_key_effective = (llm_api_key or "").strip() or env_key_value
 
     st.divider()
 
@@ -312,7 +392,11 @@ with col_main:
     col_ta, col_ex = st.columns([5, 1])
     with col_ex:
         st.markdown(" ")   # padding
-        if st.button("🎲\nVí dụ", use_container_width=True, help="Sinh đoạn văn ngẫu nhiên (OpenAI nếu có key, không thì dùng đoạn mẫu)"):
+        if st.button(
+            "🎲\nVí dụ",
+            use_container_width=True,
+            help="Sinh đoạn văn ngẫu nhiên (OpenAI nếu có key, không thì dùng đoạn mẫu)",
+        ):
             with st.spinner("Đang sinh đoạn văn…"):
                 st.session_state["context_input"] = _generate_example_paragraph()
             st.rerun()
@@ -363,21 +447,22 @@ with col_main:
             }[difficulty]
 
             # ── Load models ───────────────────────────────────
+            t_start = time.perf_counter()
             with st.status("⚙️ Khởi tạo model…", expanded=True) as s:
                 try:
                     st.write("🔄 Đang kết nối ViT5…")
-                    qa_gen = load_qa_generator(viqag_model, use_api_flag, hf_token_input)
+                    qa_gen = load_qa_generator(viqag_model, hf_token_input)
                     st.write("🔄 Đang kết nối LLM backend…")
                     dist_gen = load_distractor_generator(
                         None if llm_backend == "auto" else llm_backend,
                         llm_model or None,
-                        llm_api_key or None,
+                        llm_api_key_effective or None,
                         ollama_host,
                     )
                     s.update(label="✅ Kết nối thành công!", state="complete")
                 except Exception as e:
                     s.update(label="❌ Lỗi kết nối", state="error")
-                    st.error(str(e))
+                    st.error(f"Không khởi tạo được model: {friendly_llm_error(e)}")
                     st.stop()
 
             # ── Stage 1: ViQAG ────────────────────────────────
@@ -400,9 +485,10 @@ with col_main:
                         label=f"✅ Stage 1 hoàn tất – {len(qa_pairs)} cặp Q-A",
                         state="complete",
                     )
+                    t_stage1 = time.perf_counter() - t_start
                 except Exception as e:
                     s.update(label="❌ Lỗi ViT5", state="error")
-                    st.error(f"ViT5 lỗi: {e}")
+                    st.error(f"ViT5 lỗi: {friendly_llm_error(e)}")
                     st.stop()
 
             # ── Quality filter Q-A pairs ───────────────────
@@ -458,24 +544,43 @@ with col_main:
                     )
                     while len(distractors) < num_distractors:
                         distractors.append(f"[Đáp án sai {len(distractors)+1}]")
-                    mcq_list_new.append(build_mcq(q, a, distractors[:num_distractors]))
+                    mcq_list_new.append(
+                        build_mcq(q, a, distractors[:num_distractors], num_options=num_distractors + 1)
+                    )
                 except Exception as e:
-                    print(f"[Distractor] FAILED câu {i+1}: {e}")
-                    errors_list.append(f"Câu {i+1}: {e}")
+                    print(f"[Distractor] FAILED câu {i+1}: {scrub_secrets(e)}")
+                    errors_list.append(e)
                     # Fallback: vẫn thêm câu với placeholder distractor
                     placeholders = [f"[Đáp án sai {j+1}]" for j in range(num_distractors)]
-                    mcq_list_new.append(build_mcq(q, a, placeholders))
+                    mcq_list_new.append(
+                        build_mcq(q, a, placeholders, num_options=num_distractors + 1)
+                    )
 
             progress_bar.progress(1.0, text="✅ Stage 2 hoàn tất!")
             time.sleep(0.3)
             progress_bar.empty()
+            t_stage2 = time.perf_counter() - t_start - t_stage1
 
             if errors_list:
                 st.warning(
                     f"⚠️ LLM distractor gặp lỗi {len(errors_list)}/{len(qa_pairs)} câu "
                     f"(dùng placeholder tạm). "
-                    f"Lỗi: {str(errors_list[0])[:120]}"
+                    f"Nguyên nhân: {friendly_llm_error(errors_list[0])}"
                 )
+
+            # ── Validate MCQ trước khi đưa vào session ────────
+            from schema import summarize, validate_batch
+
+            kept, rejected = validate_batch(mcq_list_new)
+            total_questions = len(mcq_list_new)
+            mcq_list_new = [mcq.to_dict() for mcq in kept]
+            st.session_state["validation_report"] = summarize(
+                total_questions, len(mcq_list_new), rejected
+            )
+            st.session_state["stage_times"] = {
+                "Khởi tạo + Stage 1 (ViT5)": t_stage1,
+                "Stage 2 (LLM)": t_stage2,
+            }
 
             st.session_state["mcq_list"] = mcq_list_new
             st.session_state["selected"] = set(range(len(mcq_list_new)))
@@ -492,6 +597,16 @@ with col_main:
     if mcq_list:
         st.divider()
         st.markdown(f"#### ✏️ Bước 3 – Xem và chỉnh sửa ({len(mcq_list)} câu)")
+
+        # Báo cáo validate + thời gian chạy từng stage (nếu vừa sinh xong)
+        _report = st.session_state.get("validation_report")
+        if _report:
+            st.caption(f"🧪 {_report}")
+        _timings = st.session_state.get("stage_times")
+        if _timings:
+            st.caption(
+                "⏱ " + " · ".join(f"{name}: {secs:.1f}s" for name, secs in _timings.items())
+            )
 
         # Thanh hành động nhanh
         act1, act2, act3, act4 = st.columns(4)
@@ -547,7 +662,8 @@ with col_main:
                 with hc2:
                     st.markdown(
                         f'<span style="font-weight:700;font-size:1rem;">Câu {idx+1}</span>'
-                        f'<span class="badge badge-viqag" style="font-size:.7rem;">{mcq.get("source","ViT5+LLM")}</span>',
+                        f'<span class="badge badge-viqag" style="font-size:.7rem;">'
+                        f'{mcq.get("source", "ViT5+LLM")}</span>',
                         unsafe_allow_html=True,
                     )
 
@@ -628,7 +744,7 @@ with col_main:
                     dist_gen = load_distractor_generator(
                         None if llm_backend == "auto" else llm_backend,
                         llm_model or None,
-                        llm_api_key or None,
+                        llm_api_key_effective or None,
                         ollama_host,
                     )
                     m = mcq_list[regen_idx]
@@ -640,12 +756,13 @@ with col_main:
                     while len(new_d) < num_distractors:
                         new_d.append(f"[Đáp án sai {len(new_d)+1}]")
                     st.session_state["mcq_list"][regen_idx] = build_mcq(
-                        m["question"], m["answer"], new_d[:num_distractors]
+                        m["question"], m["answer"], new_d[:num_distractors],
+                        num_options=num_distractors + 1,
                     )
                     st.success(f"✅ Đã cập nhật câu {regen_idx+1}!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Lỗi regenerate: {e}")
+                    st.error(f"Lỗi regenerate: {friendly_llm_error(e)}")
 
     else:
         # Màn chào ban đầu
@@ -688,23 +805,47 @@ with col_preview:
 
         st.markdown("##### 📤 Xuất đề")
 
-        # ── JSON ───────────────────────────────────────────────
-        st.download_button(
-            "⬇️ JSON (import Quizizz / Google Forms)",
-            data=json.dumps(export_list, ensure_ascii=False, indent=2),
-            file_name="mcq.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        # ── JSON (format chuẩn, import lại được) ───────────────
+        try:
+            from export_utils import export_json_bytes
+
+            st.download_button(
+                "⬇️ JSON (format chuẩn)",
+                data=export_json_bytes(export_list),
+                file_name="mcq.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"JSON: {e}")
+
+        # ── CSV (Quizizz / Google Forms) ───────────────────────
+        try:
+            from export_utils import export_csv_bytes
+
+            st.download_button(
+                "⬇️ CSV (Quizizz / Google Forms)",
+                data=export_csv_bytes(export_list),
+                file_name="mcq_quizizz.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"CSV: {e}")
 
         # ── TXT ────────────────────────────────────────────────
-        st.download_button(
-            "⬇️ TXT (kèm đáp án)",
-            data=mcq_to_text(export_list, show_ans=True),
-            file_name="mcq.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        try:
+            from export_utils import export_txt_bytes
+
+            st.download_button(
+                "⬇️ TXT (kèm đáp án)",
+                data=export_txt_bytes(export_list),
+                file_name="mcq.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"TXT: {e}")
 
         # ── Word ───────────────────────────────────────────────
         try:
@@ -751,53 +892,3 @@ with col_preview:
             if st.button("☑️ Chọn tất cả & preview"):
                 st.session_state["selected"] = set(range(len(mcq_list)))
                 st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════
-# CSS tùy chỉnh
-# ══════════════════════════════════════════════════════════════
-st.markdown("""
-<style>
-    .mcq-card {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 18px 22px;
-        margin-bottom: 16px;
-    }
-    .mcq-question { font-size: 1.05rem; font-weight: 600; margin-bottom: 10px; color: #1a202c; }
-    .opt-correct  { color: #16a34a; font-weight: 600; }
-    .opt-wrong    { color: #374151; }
-    .badge-backend {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 20px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        background: #dbeafe;
-        color: #1d4ed8;
-        margin-left: 6px;
-    }
-    .stButton>button { width: 100%; }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════
-# Singleton cache cho model (chỉ load 1 lần trong session)
-# ══════════════════════════════════════════════════════════════
-@st.cache_resource(show_spinner=False)
-def load_qa_generator(model_name: str, use_api: bool, hf_token: str):
-    from generator import QAGenerator
-    return QAGenerator(model_name=model_name or None, use_api=use_api, hf_token=hf_token or None)
-
-
-@st.cache_resource(show_spinner=False)
-def load_distractor_generator(backend: str, model: str, api_key: str, ollama_host: str):
-    from distractor import DistractorGenerator
-    return DistractorGenerator(
-        backend=backend or None,
-        model=model or None,
-        api_key=api_key or None,
-        ollama_host=ollama_host or "http://localhost:11434",
-    )
