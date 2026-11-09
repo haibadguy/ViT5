@@ -1,0 +1,24 @@
+DejaVu fonts – LICENSE / ATTRIBUTION
+====================================
+
+Files in this folder:
+  • DejaVuSans.ttf
+  • DejaVuSans-Bold.ttf
+
+Source : https://github.com/dejavu-fonts/dejavu-fonts (version 2.37)
+Version used: 2.37 (from npm package `dejavu-fonts-ttf@2.37.3`)
+
+License
+-------
+The DejaVu fonts are derived from the Bitstream Vera Fonts (Copyright (c)
+2003 Bitstream, Inc.) and are released under a free license that permits
+use, modification, and redistribution, including bundling with software.
+Full text: https://dejavu-fonts.github.io/License.html
+
+These font files are bundled ONLY so that PDF export always has a Unicode
+font capable of rendering Vietnamese diacritics (Đ, ắ, ộ, …). The fonts are
+not modified.
+
+If you prefer not to ship the fonts, delete this folder: `export_utils.py`
+will fall back to a system font (Arial/Calibri/DejaVu/Liberation) and raise a
+clear error if none is available.
