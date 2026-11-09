@@ -420,6 +420,14 @@ pytest -q                 # 49 test, chạy offline (không gọi API, không t�
 ruff check .              # lint
 ```
 
+**Kiểm tra Stage 1 thật** (cần `torch` + `transformers`, **không cần API key**) — script
+chạy ViT5 local rồi build MCQ → validate → export Word/PDF vào `outputs/`:
+
+```bash
+python scripts/smoke_stage1.py --tiny   # model 5 MB: xác nhận code chạy, câu hỏi sẽ là rác
+python scripts/smoke_stage1.py          # model thật (~1 GB, lần đầu tải lâu): kiểm tra chất lượng
+```
+
 CI chạy tự động trên GitHub Actions với Python 3.10 và 3.12:
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
