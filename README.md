@@ -1,6 +1,31 @@
 ﻿# Hệ thống Sinh Câu Hỏi Trắc Nghiệm Tiếng Việt Tự Động
 
+![tests](https://github.com/haibadguy/ViT5/actions/workflows/tests.yml/badge.svg)
+![python](https://img.shields.io/badge/python-3.10%20%7C%203.12-blue)
+
 Đồ án ứng dụng mô hình ngôn ngữ lớn (PLM + LLM) vào bài toán sinh câu hỏi trắc nghiệm (Multiple Choice Question Generation) cho văn bản tiếng Việt.
+
+## ⚡ Chạy nhanh (5 dòng)
+
+```bash
+git clone https://github.com/haibadguy/ViT5.git
+cd ViT5
+python -m venv .venv && .venv\Scripts\activate     # macOS/Linux: source .venv/bin/activate
+pip install -r demo_mcq/requirements.txt
+copy demo_mcq\.env.example demo_mcq\.env            # cp trên macOS/Linux, rồi điền 1 API key
+streamlit run demo_mcq/app.py
+```
+
+Cần **một** key LLM bất kỳ (Gemini / OpenAI / Groq) hoặc Ollama local — xem bảng bên dưới.
+
+![System overview](assets/overview_system.png)
+
+> Quay một GIF thao tác thật rồi lưu tại `docs/demo.gif` để minh họa UI
+> Streamlit; ảnh kiến trúc ở trên giúp repo vẫn có hình xem ngay sau khi clone.
+
+ViT5 sinh câu hỏi và đáp án đúng từ văn bản tiếng Việt. Gemini, GPT, Groq hoặc
+Ollama chỉ sinh các đáp án nhiễu, sau đó ứng dụng chuẩn hóa và xáo trộn thành
+MCQ. Xem định dạng đầu ra mẫu tại [`docs/sample_output.json`](docs/sample_output.json).
 
 Pipeline gồm 2 giai đoạn:
 
@@ -32,6 +57,26 @@ Pipeline gồm 2 giai đoạn:
 
 ---
 
+## 🤖 Chọn backend LLM
+
+Stage 2 (sinh đáp án nhiễu) cần **một** backend. Đặt key trong `demo_mcq/.env`
+rồi chọn `LLM_BACKEND` (hoặc để `auto` — app tự dò theo key có sẵn).
+
+| Backend | Cần gì | Dùng khi nào | Chi phí |
+|---|---|---|---|
+| **Gemini** | `GEMINI_API_KEY` | Mặc định, nhanh, free tier | Free tier |
+| **OpenAI** | `OPENAI_API_KEY` | Cần chất lượng cao nhất | Trả phí |
+| **Groq** | `GROQ_API_KEY` | Cần tốc độ cao, free tier | Free tier |
+| **Ollama** | Cài [Ollama](https://ollama.ai) local | Không muốn gửi dữ liệu ra ngoài | Miễn phí |
+
+Danh sách biến môi trường đầy đủ: [`demo_mcq/.env.example`](demo_mcq/.env.example)
+(gồm cả `<BACKEND>_MODEL` để đổi model mặc định và `GEMINI_API_KEY_2…` để luân phiên key).
+
+> **Lưu ý:** chế độ *HF Inference API* đã bị bỏ (xem [CHANGELOG.md](CHANGELOG.md)).
+> Stage 1 (ViT5) luôn chạy local bằng `torch` + `transformers`.
+
+---
+
 ## 📦 Cấu trúc repo
 
 ```
@@ -60,10 +105,15 @@ ViT5/
     ├── app.py                  ← Streamlit UI (entry point)
     ├── generator.py            ← Stage 1: ViQAG pipeline wrapper
     ├── distractor.py           ← Stage 2: LLM distractor generator
-    ├── export_utils.py         ← Xuất đề ra Word (.docx) / PDF
+    ├── schema.py               ← Kiểu dữ liệu MCQ + validate
+    ├── export_utils.py         ← Xuất Word / PDF / TXT / JSON / CSV
+    ├── assets/fonts/           ← DejaVuSans (nhúng cho PDF tiếng Việt)
     ├── .env                    ← API keys (tạo từ .env.example)
     ├── .env.example
-    └── requirements.txt
+    ├── requirements.txt
+    └── requirements-dev.txt
+├── tests/                    # pytest (chạy offline, không gọi API)
+└── .github/workflows/        # CI: ruff + pytest --cov
 ```
 
 ---
@@ -118,7 +168,7 @@ cp .env.example .env     # Mac / Linux
 VIQAG_MODEL=shnl/vit5-vinewsqa-qg-ae
 
 # HuggingFace token (chỉ cần khi dùng HF Inference API)
-HF_TOKEN=hf_xxxxxxxxxxxxxxxxxx
+HF_TOKEN=your_huggingface_token_here
 
 # Gemini API key – lấy tại https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -344,13 +394,55 @@ Các metric được tính: BLEU-4, ROUGE-L, BERTScore (F1).
 
 | Lỗi | Nguyên nhân | Cách xử lý |
 |---|---|---|
-| `CUDA out of memory` | GPU không đủ VRAM | Thêm `device='cpu'` hoặc giảm `MAX_INPUT_LEN` |
+| `CUDA out of memory` | GPU không đủ VRAM | Thêm `device='cpu'` hoặc dùng `VIQAG_MODEL` nhỏ hơn |
 | `Token length exceeded` | Context quá dài | Rút ngắn dưới 400 từ |
-| `JSONDecodeError` (distractor) | LLM trả về format lạ | Đã auto-retry trong `distractor.py` |
-| `429 RESOURCE_EXHAUSTED` | LLM rate limit (Gemini free) | Đã auto-retry với exponential backoff |
+| `JSONDecodeError` (distractor) | LLM trả về format lạ | Đã auto-fallback trong `distractor.py` (test: `tests/test_parser.py`) |
+| `429 RESOURCE_EXHAUSTED` / quota | Hết quota free tier | App đã retry + luân phiên key; đợi ~1 phút hoặc đổi backend (Groq) |
+| `401` / `API key not valid` | Key sai hoặc đã bị thu hồi | Tạo key mới, cập nhật `.env`, khởi động lại app |
+| `Connection refused` (Ollama) | Chưa chạy server | Chạy `ollama serve` rồi kiểm tra `OLLAMA_HOST` |
 | Câu hỏi ra tiếng Anh | Sai model | Dùng model fine-tuned tiếng Việt (xem bảng trên) |
-| PDF lỗi font `Đ`, `ắ`, `ộ`… | Helvetica không hỗ trợ Unicode | `export_utils.py` tự tìm font TTF hệ thống (Arial, DejaVu) |
+| PDF mất dấu `Đ`, `ắ`, `ộ`… | Thiếu font Unicode | Repo đã nhúng `demo_mcq/assets/fonts/DejaVuSans.ttf`; nếu vẫn lỗi, cài `fonts-dejavu-core` |
 | `label got an empty value` (Streamlit) | `st.checkbox("")` | Đã sửa thành label ẩn có nội dung |
+
+> Lỗi từ backend được hiển thị qua `friendly_llm_error()` (401/429/timeout/CUDA) và
+> **API key luôn được mask** (`mask_key`, `scrub_secrets`) — không in ra UI hay log.
+
+---
+
+## ✅ Kiểm thử & CI
+
+```bash
+pip install -r demo_mcq/requirements-dev.txt
+pytest -q                 # 36 test, chạy offline (không gọi API, không tải model)
+ruff check .              # lint
+```
+
+CI chạy tự động trên GitHub Actions với Python 3.10 và 3.12:
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
+| File test | Nội dung |
+|---|---|
+| `tests/test_schema.py` | Validate MCQ: thiếu lựa chọn, trùng, index sai, round-trip dict |
+| `tests/test_parser.py` | Parse JSON từ LLM (fence, chatty, fallback) + parse bộ đề JSON |
+| `tests/test_export.py` | Word / PDF / TXT / JSON / CSV — kiểm tra dấu tiếng Việt & trang đáp án |
+| `tests/test_generator.py` | `QAGenerator` với `_load_local` bị mock (không cần torch) |
+| `tests/test_distractor.py` | Parse distractor + chọn backend + override model qua env |
+
+---
+
+## ⚠️ Giới hạn đã biết
+
+- **Chất lượng câu hỏi phụ thuộc model ViT5** (`shnl/vit5-vinewsqa-qg-ae`): có thể sinh
+  câu trùng ý hoặc đáp án quá dài. App đã lọc Jaccard + kiểm tra answer leakage, nhưng
+  giáo viên **vẫn cần rà soát** trước khi dùng.
+- **Đáp án nhiễu do LLM sinh** có thể trùng nhau hoặc quá dễ; câu không hợp lệ bị loại
+  tự động (`schema.validate`, hiển thị số câu giữ/loại trên UI).
+- **Export PDF** cần font Unicode; repo có sẵn DejaVuSans (giấy phép Bitstream Vera, cho
+  phép nhúng). Môi trường không có font nào sẽ báo lỗi rõ ràng thay vì xuất PDF mất dấu.
+- **Chưa có benchmark định lượng** (chưa đo tỉ lệ câu dùng được / độ nhiễu).
+- **Chi phí API**: Gemini/Groq free tier có giới hạn request; OpenAI tính phí theo token.
+- **Không gửi dữ liệu nhạy cảm** lên LLM cloud; dùng Ollama nếu cần giữ dữ liệu nội bộ.
+- **UI chưa có** lưu/tải bộ đề JSON từ file và form metadata đề thi (đang ở roadmap).
 
 ---
 
@@ -396,4 +488,3 @@ Nếu bạn sử dụng nghiên cứu gốc trong công trình của mình, vui 
   doi       = {10.1145/3675781}
 }
 ```
-

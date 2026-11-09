@@ -1,0 +1,17 @@
+[
+  {
+    "question": "Hà Nội là thủ đô của quốc gia nào?",
+    "options": ["Việt Nam", "Lào", "Campuchia", "Thái Lan"],
+    "correct_index": 0,
+    "correct_label": "A",
+    "explanation": ""
+  },
+  {
+    "question": "Hà Nội từng được gọi là gì dưới triều đại nhà Lý?",
+    "options": ["Thăng Long", "Đông Đô", "Hoa Lư", "Phú Xuân"],
+    "correct_index": 0,
+    "correct_label": "A",
+    "explanation": ""
+  }
+]
+

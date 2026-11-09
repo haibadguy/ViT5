@@ -1,10 +1,18 @@
-# 📝 Vietnamese MCQ Generator – Demo App
+﻿# 📝 Vietnamese MCQ Generator – Demo App
 
 Web app sinh câu hỏi trắc nghiệm tiếng Việt cho giáo viên, chạy bằng **Streamlit**.
 
 ```
 Đoạn văn  →  ViQAG (ViT5)  →  Q+A  →  LLM  →  Distractors  →  MCQ  →  Export
 ```
+
+![System overview](../assets/overview_system.png)
+
+> Có thể lưu GIF thao tác Streamlit tại `../docs/demo.gif` sau khi quay demo thật.
+
+ViT5 chịu trách nhiệm sinh câu hỏi và đáp án đúng từ văn bản tiếng Việt.
+Gemini, GPT, Groq hoặc Ollama chỉ sinh các đáp án nhiễu; chúng không thay thế
+giai đoạn sinh câu hỏi của ViT5.
 
 ---
 
@@ -32,11 +40,11 @@ copy .env.example .env    # Windows
 Điền vào `.env`:
 
 ```env
-VIQAG_MODEL=VietAI/vit5-base-vi-qag
-HF_TOKEN=hf_...                          # huggingface.co/settings/tokens
+VIQAG_MODEL=shnl/vit5-vinewsqa-qg-ae
+HF_TOKEN=your_huggingface_token_here     # huggingface.co/settings/tokens
 
-GEMINI_API_KEY=REDACTED_SECRET
-# OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=your_gemini_api_key_here
+# OPENAI_API_KEY=your_openai_api_key_here
 # OLLAMA_HOST=http://localhost:11434
 ```
 
@@ -56,12 +64,15 @@ streamlit run app.py
 
 ```
 demo_mcq/
-├── app.py            # Streamlit UI – entry point
-├── generator.py      # Stage 1: ViQAG (ViT5) sinh Q-A
-├── distractor.py     # Stage 2: LLM sinh distractors
-├── export_utils.py   # Xuất Word (.docx) và PDF
+├── app.py              # Streamlit UI – entry point
+├── generator.py        # Stage 1: ViQAG (ViT5) sinh Q-A
+├── distractor.py       # Stage 2: LLM sinh distractors
+├── schema.py           # Kiểu dữ liệu MCQ + validate
+├── export_utils.py     # Xuất Word / PDF / TXT / JSON / CSV
+├── assets/fonts/       # DejaVuSans nhúng sẵn cho PDF tiếng Việt
 ├── requirements.txt
-├── .env              # API keys (tạo từ .env.example)
+├── requirements-dev.txt
+├── .env                # API keys (tạo từ .env.example)
 └── .env.example
 ```
 
@@ -69,22 +80,26 @@ demo_mcq/
 
 ## 🧩 Kiến trúc
 
-### Stage 1 – `generator.py` (ViQAG)
+### Stage 1 – `generator.py` (ViT5, chạy local)
 
-| Chế độ | Yêu cầu | Tốc độ |
+| Điều kiện | Yêu cầu | Tốc độ |
 |---|---|---|
-| **HF Inference API** | HF Token miễn phí | Nhanh, không cần GPU |
-| **Local model** | ~1 GB RAM | Nhanh sau lần tải đầu |
+| Model local | ~1 GB RAM (CPU đủ dùng) | Nhanh sau lần tải đầu |
 
-Model: `VietAI/vit5-base-vi-qag`
+Model mặc định: `shnl/vit5-vinewsqa-qg-ae`. `HF_TOKEN` chỉ cần khi model gated/private.
+> Chế độ *HF Inference API* đã bị bỏ — model ViT5 tiếng Việt không khả dụng qua API đó.
 
 ### Stage 2 – `distractor.py` (LLM)
 
-| Backend | Chất lượng | Setup |
-|---|---|---|
-| **Gemini** (gemini-1.5-flash) | ⭐⭐⭐⭐⭐ | `GEMINI_API_KEY` – miễn phí |
-| **OpenAI** (gpt-4o-mini) | ⭐⭐⭐⭐⭐ | `OPENAI_API_KEY` – trả phí |
-| **Ollama** (llama3/qwen2) | ⭐⭐⭐ | Local – miễn phí |
+| Backend | Model mặc định | Setup | Chi phí |
+|---|---|---|---|
+| **Gemini** | `gemini-2.5-flash-lite` | `GEMINI_API_KEY` | Free tier |
+| **OpenAI** | `gpt-4o-mini` | `OPENAI_API_KEY` | Trả phí |
+| **Groq** | `llama-3.3-70b-versatile` | `GROQ_API_KEY` | Free tier |
+| **Ollama** | `llama3` | `ollama serve` | Miễn phí |
+
+Chọn backend bằng `LLM_BACKEND` trong `.env` (hoặc `auto` = tự dò theo key có sẵn).
+Đổi model bằng `<BACKEND>_MODEL` (vd `GROQ_MODEL`).
 
 ---
 
@@ -97,15 +112,17 @@ Model: `VietAI/vit5-base-vi-qag`
 - Xáo thứ tự A/B/C/D
 - Chọn câu để xuất (checkbox)
 - Lịch sử 10 đề gần nhất
+- Hiển thị số câu sinh ra / giữ lại sau validate (kèm lý do loại)
 
 ## 📤 Export
 
 | Định dạng | Nội dung |
 |---|---|
-| **Word (.docx)** | Đề thi + trang đáp án riêng |
-| **PDF** | Đề thi + trang đáp án riêng |
-| **TXT** | Kèm ghi chú đáp án đúng |
-| **JSON** | Import Quizizz / Google Forms |
+| **Word (.docx)** | Đề sạch + trang đáp án riêng |
+| **PDF** | Đề sạch + trang đáp án riêng (font DejaVu nhúng) |
+| **TXT** | Kèm bảng đáp án ở cuối |
+| **JSON** | Format chuẩn (`correct_index`), import lại được |
+| **CSV** | Template Quizizz / Google Forms (UTF-8 BOM) |
 
 ---
 
@@ -113,149 +130,25 @@ Model: `VietAI/vit5-base-vi-qag`
 
 | Lỗi | Fix |
 |---|---|
-| `CUDA out of memory` | Dùng HF Inference API |
-| `JSONDecodeError` | `distractor.py` tự xử lý fallback |
-| `429 Too Many Requests` | Tự retry 3 lần với sleep |
-| Câu hỏi tiếng Anh | Đổi model → `VietAI/vit5-base-vi-qag` |
-| ViQAG sinh 0 câu | Văn bản quá ngắn, kiểm tra HF Token |
-
-
-Hệ thống sinh câu hỏi trắc nghiệm (MCQ) tiếng Việt tự động bằng **ViQAG (ViT5) + LLM**.
-
-```
-Đoạn văn tiếng Việt
-        │
-        ▼
-  ViQAG (ViT5)  ──►  Question + Answer
-        │
-        ▼
-     LLM  ──────────►  3 Distractors (đáp án sai)
-        │
-        ▼
-   Build MCQ  ────────►  4 options A/B/C/D
-        │
-        ▼
-  Streamlit UI
-```
+| `CUDA out of memory` | Chạy CPU hoặc dùng `VIQAG_MODEL` nhỏ hơn |
+| `JSONDecodeError` | `distractor.py` tự fallback (test: `tests/test_parser.py`) |
+| `429` / quota | App retry + luân phiên key (`GEMINI_API_KEY_2`), hoặc đổi backend |
+| `401` / key invalid | Tạo key mới, cập nhật `.env` |
+| `Connection refused` (Ollama) | `ollama serve` |
+| Câu hỏi tiếng Anh | Đổi sang model fine-tuned tiếng Việt (`shnl/vit5-vinewsqa-qg-ae`) |
+| ViQAG sinh 0 câu | Văn bản quá ngắn (<3 câu) hoặc model gated thiếu `HF_TOKEN` |
+| PDF mất dấu | Repo đã nhúng `assets/fonts/DejaVuSans.ttf`; kiểm tra file còn tồn tại |
 
 ---
 
-## 🚀 Setup nhanh (< 10 phút)
-
-### 1. Cài thư viện
+## ✅ Test
 
 ```bash
-# CPU-only (nhẹ hơn, đủ để demo)
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+cd .. && pytest -q      # 39 test, chạy offline
 ```
 
-### 2. Tạo file `.env`
+Xem thêm [`../README.md`](../README.md) (kiến trúc, giới hạn, CI) và
+[`../CHANGELOG.md`](../CHANGELOG.md).
 
-```bash
-cp .env.example .env
-```
 
-Mở `.env` và điền:
-
-| Biến | Giá trị | Ghi chú |
-|---|---|---|
-| `HF_TOKEN` | `hf_...` | Lấy tại [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `OPENAI_API_KEY` | `sk-...` | **hoặc** dùng Gemini/Ollama |
-| `GEMINI_API_KEY` | `AI...` | Miễn phí tier |
-| `OLLAMA_HOST` | `http://localhost:11434` | Nếu cài Ollama local |
-
-Chỉ cần **một** key LLM là đủ chạy.
-
-### 3. Chạy
-
-```bash
-streamlit run app.py
-```
-
-Mở trình duyệt: [http://localhost:8501](http://localhost:8501)
-
----
-
-## 📂 Cấu trúc
-
-```
-demo_mcq/
-├── app.py           # Streamlit UI (entry point)
-├── generator.py     # ViQAG – sinh Q-A từ context (ViT5)
-├── distractor.py    # LLM – sinh distractors (đáp án sai)
-├── requirements.txt
-├── .env.example     # Template biến môi trường
-└── README.md
-```
-
----
-
-## 🧩 Kiến trúc chi tiết
-
-### `generator.py` – QA Generation
-
-| Chế độ | Khi nào dùng | Yêu cầu |
-|---|---|---|
-| **HF Inference API** | Demo nhanh, không có GPU | HF Token miễn phí |
-| **Local model** | Dùng offline / nhiều request | ~1 GB RAM |
-
-Model mặc định: `VietAI/vit5-base-vi-qag` (fine-tuned QAG tiếng Việt).
-
-### `distractor.py` – Distractor Generation
-
-| Backend | Chất lượng | Setup |
-|---|---|---|
-| **OpenAI** (gpt-4o-mini) | ⭐⭐⭐⭐⭐ | API key (trả phí) |
-| **Gemini** (gemini-1.5-flash) | ⭐⭐⭐⭐ | API key miễn phí |
-| **Ollama** (llama3/qwen2) | ⭐⭐⭐ | Cài local miễn phí |
-
----
-
-## 💡 Ví dụ output
-
-```
-Context:
-Hà Nội là thủ đô của Việt Nam. Đây là thành phố lớn thứ hai...
-
-Câu 1. Thủ đô của Việt Nam là gì?
-  A. Huế
-  B. Hà Nội  ✔
-  C. Đà Nẵng
-  D. Hải Phòng
-
-Câu 2. Hà Nội là thành phố lớn thứ mấy cả nước?
-  A. Thứ nhất
-  B. Thứ ba
-  C. Thứ hai  ✔
-  D. Thứ tư
-```
-
----
-
-## 🐛 Xử lý lỗi thường gặp
-
-| Lỗi | Nguyên nhân | Fix |
-|---|---|---|
-| `CUDA out of memory` | Model quá lớn | Dùng HF API, hoặc thêm `device_map="auto"` |
-| `Token length exceeded` | Context quá dài | Rút ngắn context (<400 từ) |
-| `JSONDecodeError` | LLM trả format lạ | Đã xử lý tự động trong `distractor.py` |
-| `429 Too Many Requests` | Rate limit LLM | Tự động retry với sleep |
-| `NoneType error` | ViQAG không sinh được | Kiểm tra HF Token / context |
-| Câu hỏi ra tiếng Anh | Sai model | Đổi sang `VietAI/vit5-base-vi-qag` |
-
----
-
-## 📦 Yêu cầu hệ thống
-
-- Python 3.9+
-- RAM: ≥ 4 GB (local model) hoặc chỉ cần internet (API mode)
-- GPU: Không bắt buộc (CPU đủ để demo)
-
----
-
-## 📚 Tham khảo
-
-- [ViQAG Repository](https://github.com/asahi417/lm-question-generation)
-- [VietAI/vit5-base](https://huggingface.co/VietAI/vit5-base)
-- [Streamlit Docs](https://docs.streamlit.io)
