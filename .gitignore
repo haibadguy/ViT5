@@ -11,6 +11,8 @@ demo_mcq/__pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.idea/
+.vscode/
 *.pyc
 .coverage
 coverage.xml

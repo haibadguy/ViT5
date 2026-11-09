@@ -19,11 +19,12 @@ streamlit run demo_mcq/app.py
 ```
 
 Cần **một** key LLM bất kỳ (Gemini / OpenAI / Groq) hoặc Ollama local — xem bảng bên dưới.
+Không có key thì app vẫn mở được, nhưng bấm **Sinh câu hỏi** sẽ báo lỗi cấu hình
+(Stage 2 cần LLM để tạo đáp án nhiễu).
 
 ![System overview](assets/overview_system.png)
 
-> Quay một GIF thao tác thật rồi lưu tại `docs/demo.gif` để minh họa UI
-> Streamlit; ảnh kiến trúc ở trên giúp repo vẫn có hình xem ngay sau khi clone.
+*Hình: kiến trúc 2 stage — ViT5 sinh câu hỏi/đáp án, LLM sinh đáp án nhiễu.*
 
 ViT5 sinh câu hỏi và đáp án đúng từ văn bản tiếng Việt. Gemini, GPT, Groq hoặc
 Ollama chỉ sinh các đáp án nhiễu, sau đó ứng dụng chuẩn hóa và xáo trộn thành
