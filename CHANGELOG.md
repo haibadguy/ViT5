@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] – polish for CV
+## [1.0.0] – 2026-11-10
 
 ### Removed
 - **HF Inference API path** trong UI và `generator.py` (`use_api`): tham số này bị bỏ qua
